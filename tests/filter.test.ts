@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { filterModels, toPrimeModel } from "../src/index.ts";
+import { combineCatalogModels, filterModels, toPrimeModel } from "../src/index.ts";
 
 const config = { providers: ["OpenAI", "anthropic"], includeModels: [], excludeModels: [], includeAutoModels: false };
 const catalog = [
@@ -16,6 +16,13 @@ test("provider allowlist is case-insensitive and excludes other providers and au
 });
 test("include and exclude globs apply before output; excludes win", () => {
   assert.deepEqual(filterModels(catalog, { ...config, includeModels: ["*sonnet*", "openai/*"], excludeModels: ["*sonnet"] }).map((m) => m.id), ["openai/gpt-4.1"]);
+});
+test("models defined in combos are included alongside selected providers", () => {
+  const combos = [{ id: "custom-route", name: "Custom route" }];
+  const allModels = combineCatalogModels(catalog, combos);
+  assert.deepEqual(filterModels(allModels, config).map((m) => m.id), [
+    "openai/gpt-4.1", "anthropic/claude-sonnet", "custom-route",
+  ]);
 });
 test("auto routes can be enabled separately", () => {
   assert.deepEqual(filterModels(catalog, { ...config, includeAutoModels: true }).map((m) => m.id), ["openai/gpt-4.1", "anthropic/claude-sonnet", "auto", "auto/fast"]);

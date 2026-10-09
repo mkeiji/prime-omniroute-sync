@@ -30,6 +30,7 @@ type Model = {
   modalities?: string[];
   supports_reasoning?: boolean;
   reasoning?: boolean;
+  isCombo?: boolean;
   [key: string]: unknown;
 };
 type ModelsFile = { providers?: Record<string, Record<string, unknown>>; [key: string]: unknown };
@@ -111,13 +112,16 @@ function modelProvider(model: Model): string {
   if (typeof model.id !== "string") return "";
   return model.id.includes("/") ? model.id.slice(0, model.id.indexOf("/")) : "";
 }
+export function combineCatalogModels(data: Model[], combos: Model[] = []): Model[] {
+  return [...data, ...combos.map((model) => ({ ...model, isCombo: true }))];
+}
 export function filterModels(models: Model[], config: Config): Model[] {
   const providers = new Set(config.providers.map((name) => name.toLowerCase()));
   return models.filter((model) => {
     if (!model.id || typeof model.id !== "string") return false;
     const id = model.id;
     const isAuto = id === "auto" || id.startsWith("auto/");
-    if (isAuto ? !config.includeAutoModels : !providers.has(modelProvider(model).toLowerCase())) return false;
+    if (isAuto ? !config.includeAutoModels : !model.isCombo && !providers.has(modelProvider(model).toLowerCase())) return false;
     if (config.includeModels.length && !matchesAny(id, config.includeModels)) return false;
     return !matchesAny(id, config.excludeModels);
   });
@@ -147,9 +151,9 @@ async function fetchCatalog(config: Config): Promise<Model[]> {
     signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) throw new Error(`OmniRoute returned HTTP ${response.status} from /v1/models.`);
-  const payload = await response.json() as { data?: Model[] };
+  const payload = await response.json() as { data?: Model[]; combos?: Model[] };
   if (!Array.isArray(payload.data)) throw new Error("OmniRoute response did not contain a data[] model list.");
-  return payload.data;
+  return combineCatalogModels(payload.data, Array.isArray(payload.combos) ? payload.combos : []);
 }
 function register(pi: ExtensionAPI, config: Config, models: Record<string, unknown>[]): void {
   if (!models.length) return;
