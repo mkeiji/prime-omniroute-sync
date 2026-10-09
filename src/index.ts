@@ -113,7 +113,10 @@ function modelProvider(model: Model): string {
   return model.id.includes("/") ? model.id.slice(0, model.id.indexOf("/")) : "";
 }
 export function combineCatalogModels(data: Model[], combos: Model[] = []): Model[] {
-  return [...data, ...combos.map((model) => ({ ...model, isCombo: true }))];
+  // On duplicate IDs, combo metadata wins because the combo is the selectable route.
+  const byId = new Map(data.map((model) => [model.id, model]));
+  for (const model of combos) byId.set(model.id, { ...model, isCombo: true });
+  return [...byId.values()];
 }
 export function filterModels(models: Model[], config: Config): Model[] {
   const providers = new Set(config.providers.map((name) => name.toLowerCase()));
@@ -166,7 +169,6 @@ function register(pi: ExtensionAPI, config: Config, models: Record<string, unkno
   });
 }
 async function sync(pi: ExtensionAPI, config: Config): Promise<number> {
-  if (!config.providers.length) throw new Error("No providers selected. Run /omniroute setup and enter provider prefixes.");
   const catalog = await fetchCatalog(config);
   const selected = filterModels(catalog, config);
   if (!selected.length) throw new Error("No models matched the selected providers and filters; models.json was not changed.");
@@ -199,11 +201,18 @@ export default async function (pi: ExtensionAPI): Promise<void> {
           ctx.ui.notify("Connecting to OmniRoute and discovering provider prefixes…", "info");
           const catalog = await fetchCatalog(draft);
           const available = providerNames(catalog);
-          if (!available.length) throw new Error("No provider-prefixed model IDs found in the OmniRoute catalog.");
-          ctx.ui.notify(`Available provider prefixes:\n${available.join(", ")}`, "info");
-          const providersText = await ctx.ui.input("Provider prefixes to include (comma-separated)", config.providers.join(", "));
-          if (providersText === undefined || !providersText.trim()) return;
-          draft.providers = [...new Set(providersText.split(",").map((p) => p.trim()).filter(Boolean))];
+          if (!available.length && !catalog.some((model) => model.isCombo && model.id)) {
+            throw new Error("No selectable models found in the OmniRoute catalog.");
+          }
+          if (available.length) {
+            ctx.ui.notify(`Available provider prefixes:\n${available.join(", ")}`, "info");
+            const providersText = await ctx.ui.input("Provider prefixes to include (comma-separated)", config.providers.join(", "));
+            if (providersText === undefined) return;
+            draft.providers = [...new Set(providersText.split(",").map((p) => p.trim()).filter(Boolean))];
+          } else {
+            ctx.ui.notify("No provider prefixes found; combo models will be synced.", "info");
+            draft.providers = [];
+          }
           config = draft;
           saveConfig(config);
           const count = await sync(pi, config);
