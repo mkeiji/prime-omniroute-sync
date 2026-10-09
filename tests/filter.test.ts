@@ -41,6 +41,24 @@ test("combo IDs override duplicate data IDs during selection and conversion", ()
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 8192, maxTokens: 512,
   });
 });
+test("combo aliases override equivalent data aliases in Prime capabilities", () => {
+  const merged = combineCatalogModels(
+    [{
+      id: "openai/alias-collision", max_output_tokens: 1024,
+      context_length: 8192, input_modalities: ["text"],
+    }],
+    [{
+      id: "openai/alias-collision", max_tokens: 512,
+      contextWindow: 4096, modalities: ["image"],
+    }],
+  );
+  assert.deepEqual(toPrimeModel(merged[0]), {
+    id: "openai/alias-collision", name: "openai/alias-collision", reasoning: false,
+    input: ["text", "image"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 4096, maxTokens: 512,
+  });
+});
 test("model conversion preserves catalog limits and provides defaults", () => {
   assert.deepEqual(toPrimeModel(catalog[0]), { id: "openai/gpt-4.1", name: "openai/gpt-4.1", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 100000, maxTokens: 4000 });
 });

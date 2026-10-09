@@ -112,11 +112,27 @@ function modelProvider(model: Model): string {
   if (typeof model.id !== "string") return "";
   return model.id.includes("/") ? model.id.slice(0, model.id.indexOf("/")) : "";
 }
+const aliasGroups = [
+  ["max_output_tokens", "max_completion_tokens", "max_tokens"],
+  ["context_length", "context_window", "contextWindow"],
+  ["input_modalities", "modalities"],
+] as const;
+function preferComboAliases(merged: Model, data: Model | undefined, combo: Model): void {
+  for (const aliases of aliasGroups) {
+    const value = aliases.map((key) => combo[key]).find((item) => item !== undefined)
+      ?? aliases.map((key) => data?.[key]).find((item) => item !== undefined);
+    for (const key of aliases) delete merged[key];
+    if (value !== undefined) merged[aliases[0]] = value;
+  }
+}
 export function combineCatalogModels(data: Model[], combos: Model[] = []): Model[] {
-  // Combo fields override matching data fields; absent fields retain catalog metadata.
+  // Combo fields override matching data fields, including across equivalent aliases.
   const byId = new Map(data.map((model) => [model.id, model]));
   for (const model of combos) {
-    byId.set(model.id, { ...byId.get(model.id), ...model, isCombo: true });
+    const catalogModel = byId.get(model.id);
+    const merged = { ...catalogModel, ...model, isCombo: true };
+    preferComboAliases(merged, catalogModel, model);
+    byId.set(model.id, merged);
   }
   return [...byId.values()];
 }
