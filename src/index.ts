@@ -26,10 +26,11 @@ type Model = {
   max_tokens?: number;
   max_output_tokens?: number;
   max_completion_tokens?: number;
-  input_modalities?: string[];
-  modalities?: string[];
+  input_modalities?: string[] | null;
+  modalities?: string[] | null;
   supports_reasoning?: boolean;
   reasoning?: boolean;
+  isCombo?: boolean;
   [key: string]: unknown;
 };
 type ModelsFile = { providers?: Record<string, Record<string, unknown>>; [key: string]: unknown };
@@ -111,13 +112,45 @@ function modelProvider(model: Model): string {
   if (typeof model.id !== "string") return "";
   return model.id.includes("/") ? model.id.slice(0, model.id.indexOf("/")) : "";
 }
+const aliasGroups = [
+  ["max_output_tokens", "max_completion_tokens", "max_tokens"],
+  ["context_length", "context_window", "contextWindow"],
+  ["input_modalities", "modalities"],
+] as const;
+function isValidLimit(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+function firstValidLimit(model: Model | undefined, aliases: readonly string[]): number | undefined {
+  return aliases.map((key) => model?.[key]).find(isValidLimit);
+}
+function preferComboAliases(merged: Model, data: Model | undefined, combo: Model): void {
+  for (const aliases of aliasGroups) {
+    const value = aliases[0] === "input_modalities"
+      ? aliases.map((key) => combo[key]).find((item) => item != null)
+        ?? aliases.map((key) => data?.[key]).find((item) => item != null)
+      : firstValidLimit(combo, aliases) ?? firstValidLimit(data, aliases);
+    for (const key of aliases) delete merged[key];
+    if (value !== undefined) merged[aliases[0]] = value;
+  }
+}
+export function combineCatalogModels(data: Model[], combos: Model[] = []): Model[] {
+  // Combo fields override matching data fields, including across equivalent aliases.
+  const byId = new Map(data.map((model) => [model.id, model]));
+  for (const model of combos) {
+    const catalogModel = byId.get(model.id);
+    const merged = { ...catalogModel, ...model, isCombo: true };
+    preferComboAliases(merged, catalogModel, model);
+    byId.set(model.id, merged);
+  }
+  return [...byId.values()];
+}
 export function filterModels(models: Model[], config: Config): Model[] {
   const providers = new Set(config.providers.map((name) => name.toLowerCase()));
   return models.filter((model) => {
     if (!model.id || typeof model.id !== "string") return false;
     const id = model.id;
     const isAuto = id === "auto" || id.startsWith("auto/");
-    if (isAuto ? !config.includeAutoModels : !providers.has(modelProvider(model).toLowerCase())) return false;
+    if (isAuto ? !config.includeAutoModels : !model.isCombo && !providers.has(modelProvider(model).toLowerCase())) return false;
     if (config.includeModels.length && !matchesAny(id, config.includeModels)) return false;
     return !matchesAny(id, config.excludeModels);
   });
@@ -138,8 +171,7 @@ export function toPrimeModel(model: Model): Record<string, unknown> {
   };
 }
 function numberOr(...values: unknown[]): number {
-  for (const value of values) if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
-  return 128_000;
+  return values.find(isValidLimit) ?? 128_000;
 }
 async function fetchCatalog(config: Config): Promise<Model[]> {
   const response = await fetch(`${config.serverUrl}/v1/models`, {
@@ -147,9 +179,9 @@ async function fetchCatalog(config: Config): Promise<Model[]> {
     signal: AbortSignal.timeout(30_000),
   });
   if (!response.ok) throw new Error(`OmniRoute returned HTTP ${response.status} from /v1/models.`);
-  const payload = await response.json() as { data?: Model[] };
+  const payload = await response.json() as { data?: Model[]; combos?: Model[] };
   if (!Array.isArray(payload.data)) throw new Error("OmniRoute response did not contain a data[] model list.");
-  return payload.data;
+  return combineCatalogModels(payload.data, Array.isArray(payload.combos) ? payload.combos : []);
 }
 function register(pi: ExtensionAPI, config: Config, models: Record<string, unknown>[]): void {
   if (!models.length) return;
@@ -162,7 +194,6 @@ function register(pi: ExtensionAPI, config: Config, models: Record<string, unkno
   });
 }
 async function sync(pi: ExtensionAPI, config: Config): Promise<number> {
-  if (!config.providers.length) throw new Error("No providers selected. Run /omniroute setup and enter provider prefixes.");
   const catalog = await fetchCatalog(config);
   const selected = filterModels(catalog, config);
   if (!selected.length) throw new Error("No models matched the selected providers and filters; models.json was not changed.");
@@ -172,7 +203,7 @@ async function sync(pi: ExtensionAPI, config: Config): Promise<number> {
   return models.length;
 }
 function providerNames(models: Model[]): string[] {
-  return [...new Set(models.map(modelProvider).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  return [...new Set(models.filter((model) => !model.isCombo).map(modelProvider).filter(Boolean))].sort((a, b) => a.localeCompare(b));
 }
 
 export default async function (pi: ExtensionAPI): Promise<void> {
@@ -195,11 +226,18 @@ export default async function (pi: ExtensionAPI): Promise<void> {
           ctx.ui.notify("Connecting to OmniRoute and discovering provider prefixes…", "info");
           const catalog = await fetchCatalog(draft);
           const available = providerNames(catalog);
-          if (!available.length) throw new Error("No provider-prefixed model IDs found in the OmniRoute catalog.");
-          ctx.ui.notify(`Available provider prefixes:\n${available.join(", ")}`, "info");
-          const providersText = await ctx.ui.input("Provider prefixes to include (comma-separated)", config.providers.join(", "));
-          if (providersText === undefined || !providersText.trim()) return;
-          draft.providers = [...new Set(providersText.split(",").map((p) => p.trim()).filter(Boolean))];
+          if (!available.length && !catalog.some((model) => model.isCombo && model.id)) {
+            throw new Error("No selectable models found in the OmniRoute catalog.");
+          }
+          if (available.length) {
+            ctx.ui.notify(`Available provider prefixes:\n${available.join(", ")}`, "info");
+            const providersText = await ctx.ui.input("Provider prefixes to include (comma-separated)", config.providers.join(", "));
+            if (providersText === undefined) return;
+            draft.providers = [...new Set(providersText.split(",").map((p) => p.trim()).filter(Boolean))];
+          } else {
+            ctx.ui.notify("No provider prefixes found; combo models will be synced.", "info");
+            draft.providers = [];
+          }
           config = draft;
           saveConfig(config);
           const count = await sync(pi, config);

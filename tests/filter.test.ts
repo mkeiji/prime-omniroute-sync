@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { filterModels, toPrimeModel } from "../src/index.ts";
+import { combineCatalogModels, filterModels, toPrimeModel } from "../src/index.ts";
 
 const config = { providers: ["OpenAI", "anthropic"], includeModels: [], excludeModels: [], includeAutoModels: false };
 const catalog = [
@@ -17,8 +17,71 @@ test("provider allowlist is case-insensitive and excludes other providers and au
 test("include and exclude globs apply before output; excludes win", () => {
   assert.deepEqual(filterModels(catalog, { ...config, includeModels: ["*sonnet*", "openai/*"], excludeModels: ["*sonnet"] }).map((m) => m.id), ["openai/gpt-4.1"]);
 });
+test("models defined in combos are included alongside selected providers", () => {
+  const combos = [{ id: "custom-route", name: "Custom route" }];
+  const allModels = combineCatalogModels(catalog, combos);
+  assert.deepEqual(filterModels(allModels, config).map((m) => m.id), [
+    "openai/gpt-4.1", "anthropic/claude-sonnet", "custom-route",
+  ]);
+});
 test("auto routes can be enabled separately", () => {
   assert.deepEqual(filterModels(catalog, { ...config, includeAutoModels: true }).map((m) => m.id), ["openai/gpt-4.1", "anthropic/claude-sonnet", "auto", "auto/fast"]);
+});
+test("combo IDs override duplicate data IDs during selection and conversion", () => {
+  const merged = combineCatalogModels(
+    [{ id: "openai/shared", name: "Data", context_window: 8192, max_tokens: 1024 }],
+    [{ id: "openai/shared", name: "Combo", max_tokens: 512 }],
+  );
+  const selected = filterModels(merged, { ...config, providers: [] });
+  assert.equal(selected.length, 1);
+  assert.equal(selected[0].name, "Combo");
+  assert.equal(selected[0].isCombo, true);
+  assert.deepEqual(toPrimeModel(selected[0]), {
+    id: "openai/shared", name: "Combo", reasoning: false, input: ["text"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 8192, maxTokens: 512,
+  });
+});
+test("combo aliases override equivalent data aliases in Prime capabilities", () => {
+  const merged = combineCatalogModels(
+    [{
+      id: "openai/alias-collision", max_output_tokens: 1024,
+      context_length: 8192, input_modalities: ["text"],
+    }],
+    [{
+      id: "openai/alias-collision", max_tokens: 512,
+      contextWindow: 4096, modalities: ["image"],
+    }],
+  );
+  assert.deepEqual(toPrimeModel(merged[0]), {
+    id: "openai/alias-collision", name: "openai/alias-collision", reasoning: false,
+    input: ["text", "image"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 4096, maxTokens: 512,
+  });
+});
+test("numeric aliases skip invalid combo values and retain valid limits", () => {
+  const comboOnly = combineCatalogModels([], [{
+    id: "custom/zero-alias", max_output_tokens: 0, max_tokens: 512, context_length: 8192,
+  }])[0];
+  assert.equal(toPrimeModel(comboOnly).maxTokens, 512);
+
+  const withDataFallback = combineCatalogModels(
+    [{ id: "custom/data-limit", max_tokens: 640 }],
+    [{ id: "custom/data-limit", max_output_tokens: 0 }],
+  )[0];
+  assert.equal(toPrimeModel(withDataFallback).maxTokens, 640);
+});
+test("modality aliases skip null but preserve explicit empty-array precedence", () => {
+  const nullComboAlias = combineCatalogModels([], [{
+    id: "custom/null-modalities", input_modalities: null, modalities: ["image"],
+  }])[0];
+  assert.deepEqual(toPrimeModel(nullComboAlias).input, ["text", "image"]);
+
+  const emptyComboAlias = combineCatalogModels(
+    [{ id: "custom/empty-modalities", modalities: ["image"] }],
+    [{ id: "custom/empty-modalities", input_modalities: [] }],
+  )[0];
+  assert.deepEqual(toPrimeModel(emptyComboAlias).input, ["text"]);
 });
 test("model conversion preserves catalog limits and provides defaults", () => {
   assert.deepEqual(toPrimeModel(catalog[0]), { id: "openai/gpt-4.1", name: "openai/gpt-4.1", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 100000, maxTokens: 4000 });
