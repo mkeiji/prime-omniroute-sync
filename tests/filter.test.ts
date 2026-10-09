@@ -29,15 +29,17 @@ test("auto routes can be enabled separately", () => {
 });
 test("combo IDs override duplicate data IDs during selection and conversion", () => {
   const merged = combineCatalogModels(
-    [{ id: "openai/shared", name: "Data", context_window: 1000 }],
-    [{ id: "openai/shared", name: "Combo", context_window: 2000 }],
+    [{ id: "openai/shared", name: "Data", context_window: 8192, max_tokens: 1024 }],
+    [{ id: "openai/shared", name: "Combo", max_tokens: 512 }],
   );
   const selected = filterModels(merged, { ...config, providers: [] });
   assert.equal(selected.length, 1);
   assert.equal(selected[0].name, "Combo");
   assert.equal(selected[0].isCombo, true);
-  assert.equal(toPrimeModel(selected[0]).name, "Combo");
-  assert.equal(toPrimeModel(selected[0]).contextWindow, 2000);
+  assert.deepEqual(toPrimeModel(selected[0]), {
+    id: "openai/shared", name: "Combo", reasoning: false, input: ["text"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 8192, maxTokens: 512,
+  });
 });
 test("model conversion preserves catalog limits and provides defaults", () => {
   assert.deepEqual(toPrimeModel(catalog[0]), { id: "openai/gpt-4.1", name: "openai/gpt-4.1", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 100000, maxTokens: 4000 });

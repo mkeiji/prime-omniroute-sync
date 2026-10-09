@@ -34,6 +34,14 @@ test("setup discovers and syncs a combo-only catalog", async () => {
     assert.deepEqual(registered.map((model) => model.id), ["custom-route"]);
     assert.ok(notices.some((message) => message.includes("synced 1 models")));
 
+    globalThis.fetch = async () => new Response(JSON.stringify({
+      data: [{ id: "openai/model" }], combos: [{ id: "combo-provider/route" }],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+    answers = ["http://localhost:20128", "", "openai"];
+    await command!.handler("setup", ctx);
+    const providerNotice = notices.find((message) => message.startsWith("Available provider prefixes:"));
+    assert.deepEqual(providerNotice?.split("\n"), ["Available provider prefixes:", "openai"]);
+
     globalThis.fetch = async () => new Response(JSON.stringify({ data: [], combos: [] }), { status: 200 });
     answers = ["http://localhost:20128", ""];
     await command!.handler("setup", ctx);

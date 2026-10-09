@@ -113,9 +113,11 @@ function modelProvider(model: Model): string {
   return model.id.includes("/") ? model.id.slice(0, model.id.indexOf("/")) : "";
 }
 export function combineCatalogModels(data: Model[], combos: Model[] = []): Model[] {
-  // On duplicate IDs, combo metadata wins because the combo is the selectable route.
+  // Combo fields override matching data fields; absent fields retain catalog metadata.
   const byId = new Map(data.map((model) => [model.id, model]));
-  for (const model of combos) byId.set(model.id, { ...model, isCombo: true });
+  for (const model of combos) {
+    byId.set(model.id, { ...byId.get(model.id), ...model, isCombo: true });
+  }
   return [...byId.values()];
 }
 export function filterModels(models: Model[], config: Config): Model[] {
@@ -178,7 +180,7 @@ async function sync(pi: ExtensionAPI, config: Config): Promise<number> {
   return models.length;
 }
 function providerNames(models: Model[]): string[] {
-  return [...new Set(models.map(modelProvider).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  return [...new Set(models.filter((model) => !model.isCombo).map(modelProvider).filter(Boolean))].sort((a, b) => a.localeCompare(b));
 }
 
 export default async function (pi: ExtensionAPI): Promise<void> {
