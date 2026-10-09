@@ -59,6 +59,30 @@ test("combo aliases override equivalent data aliases in Prime capabilities", () 
     contextWindow: 4096, maxTokens: 512,
   });
 });
+test("numeric aliases skip invalid combo values and retain valid limits", () => {
+  const comboOnly = combineCatalogModels([], [{
+    id: "custom/zero-alias", max_output_tokens: 0, max_tokens: 512, context_length: 8192,
+  }])[0];
+  assert.equal(toPrimeModel(comboOnly).maxTokens, 512);
+
+  const withDataFallback = combineCatalogModels(
+    [{ id: "custom/data-limit", max_tokens: 640 }],
+    [{ id: "custom/data-limit", max_output_tokens: 0 }],
+  )[0];
+  assert.equal(toPrimeModel(withDataFallback).maxTokens, 640);
+});
+test("modality aliases skip null but preserve explicit empty-array precedence", () => {
+  const nullComboAlias = combineCatalogModels([], [{
+    id: "custom/null-modalities", input_modalities: null, modalities: ["image"],
+  }])[0];
+  assert.deepEqual(toPrimeModel(nullComboAlias).input, ["text", "image"]);
+
+  const emptyComboAlias = combineCatalogModels(
+    [{ id: "custom/empty-modalities", modalities: ["image"] }],
+    [{ id: "custom/empty-modalities", input_modalities: [] }],
+  )[0];
+  assert.deepEqual(toPrimeModel(emptyComboAlias).input, ["text"]);
+});
 test("model conversion preserves catalog limits and provides defaults", () => {
   assert.deepEqual(toPrimeModel(catalog[0]), { id: "openai/gpt-4.1", name: "openai/gpt-4.1", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 100000, maxTokens: 4000 });
 });

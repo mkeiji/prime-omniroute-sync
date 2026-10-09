@@ -26,8 +26,8 @@ type Model = {
   max_tokens?: number;
   max_output_tokens?: number;
   max_completion_tokens?: number;
-  input_modalities?: string[];
-  modalities?: string[];
+  input_modalities?: string[] | null;
+  modalities?: string[] | null;
   supports_reasoning?: boolean;
   reasoning?: boolean;
   isCombo?: boolean;
@@ -117,10 +117,18 @@ const aliasGroups = [
   ["context_length", "context_window", "contextWindow"],
   ["input_modalities", "modalities"],
 ] as const;
+function isValidLimit(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+function firstValidLimit(model: Model | undefined, aliases: readonly string[]): number | undefined {
+  return aliases.map((key) => model?.[key]).find(isValidLimit);
+}
 function preferComboAliases(merged: Model, data: Model | undefined, combo: Model): void {
   for (const aliases of aliasGroups) {
-    const value = aliases.map((key) => combo[key]).find((item) => item !== undefined)
-      ?? aliases.map((key) => data?.[key]).find((item) => item !== undefined);
+    const value = aliases[0] === "input_modalities"
+      ? aliases.map((key) => combo[key]).find((item) => item != null)
+        ?? aliases.map((key) => data?.[key]).find((item) => item != null)
+      : firstValidLimit(combo, aliases) ?? firstValidLimit(data, aliases);
     for (const key of aliases) delete merged[key];
     if (value !== undefined) merged[aliases[0]] = value;
   }
@@ -163,8 +171,7 @@ export function toPrimeModel(model: Model): Record<string, unknown> {
   };
 }
 function numberOr(...values: unknown[]): number {
-  for (const value of values) if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
-  return 128_000;
+  return values.find(isValidLimit) ?? 128_000;
 }
 async function fetchCatalog(config: Config): Promise<Model[]> {
   const response = await fetch(`${config.serverUrl}/v1/models`, {
