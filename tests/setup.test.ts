@@ -35,12 +35,27 @@ test("setup discovers and syncs a combo-only catalog", async () => {
     assert.ok(notices.some((message) => message.includes("synced 1 models")));
 
     globalThis.fetch = async () => new Response(JSON.stringify({
-      data: [{ id: "openai/model" }], combos: [{ id: "combo-provider/route" }],
+      data: [
+        { id: "openai/model" },
+        { id: "google/model" },
+        { id: "kg-medium", owned_by: "combo", context_length: 64000 },
+        { id: "auto/fast", owned_by: "combo" },
+        { id: "openai/shared", name: "In data", owned_by: "combo", max_tokens: 512 },
+      ],
+      combos: [
+        { id: "combo-provider/route" },
+        { id: "openai/shared", name: "Separate combo", max_tokens: 256 },
+      ],
     }), { status: 200, headers: { "content-type": "application/json" } });
     answers = ["http://localhost:20128", "", "openai"];
     await command!.handler("setup", ctx);
     const providerNotice = notices.find((message) => message.startsWith("Available provider prefixes:"));
-    assert.deepEqual(providerNotice?.split("\n"), ["Available provider prefixes:", "openai"]);
+    assert.deepEqual(providerNotice?.split("\n"), ["Available provider prefixes:", "google, openai"]);
+    const synced = registered.map((model) => model.id);
+    assert.deepEqual(synced, ["custom-route", "openai/model", "kg-medium", "openai/shared", "combo-provider/route"]);
+    assert.equal(registered.find((model) => model.id === "openai/shared")?.name, "Separate combo");
+    assert.equal(registered.find((model) => model.id === "openai/shared")?.maxTokens, 256);
+    assert.equal(synced.includes("auto/fast"), false);
 
     globalThis.fetch = async () => new Response(JSON.stringify({ data: [], combos: [] }), { status: 200 });
     answers = ["http://localhost:20128", ""];
