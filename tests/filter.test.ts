@@ -27,6 +27,11 @@ test("models defined in combos are included alongside selected providers", () =>
 test("auto routes can be enabled separately", () => {
   assert.deepEqual(filterModels(catalog, { ...config, includeAutoModels: true }).map((m) => m.id), ["openai/gpt-4.1", "anthropic/claude-sonnet", "auto", "auto/fast"]);
 });
+test("auto combo routes still require includeAutoModels", () => {
+  const autoCombo = combineCatalogModels([], [{ id: "auto/fast", owned_by: "combo" }]);
+  assert.deepEqual(filterModels(autoCombo, config), []);
+  assert.deepEqual(filterModels(autoCombo, { ...config, includeAutoModels: true }).map((model) => model.id), ["auto/fast"]);
+});
 test("combo IDs override duplicate data IDs during selection and conversion", () => {
   const merged = combineCatalogModels(
     [{ id: "openai/shared", name: "Data", context_window: 8192, max_tokens: 1024 }],

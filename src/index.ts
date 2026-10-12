@@ -181,7 +181,10 @@ async function fetchCatalog(config: Config): Promise<Model[]> {
   if (!response.ok) throw new Error(`OmniRoute returned HTTP ${response.status} from /v1/models.`);
   const payload = await response.json() as { data?: Model[]; combos?: Model[] };
   if (!Array.isArray(payload.data)) throw new Error("OmniRoute response did not contain a data[] model list.");
-  return combineCatalogModels(payload.data, Array.isArray(payload.combos) ? payload.combos : []);
+  const dataCombos = payload.data.filter((model) => model.owned_by === "combo");
+  const regularModels = payload.data.filter((model) => model.owned_by !== "combo");
+  const separateCombos = Array.isArray(payload.combos) ? payload.combos : [];
+  return combineCatalogModels(regularModels, [...dataCombos, ...separateCombos]);
 }
 function register(pi: ExtensionAPI, config: Config, models: Record<string, unknown>[]): void {
   if (!models.length) return;
